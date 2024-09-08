@@ -11,7 +11,6 @@ module.exports = class extends Generator {
         default: "Component"
       }
     ]);
-    console.log("Answer is ", answers);
     this.selectedType = answers.type.toLowerCase();
   }
 

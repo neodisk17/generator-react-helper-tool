@@ -8,31 +8,32 @@ module.exports = class extends Generator {
     const answers = await this.prompt([
       {
         type: "input",
-        name: "componentName",
-        message: "What is the name of your component?",
-        default: "",
+        name: "viewName",
+        message: "What is the name of your view?",
+        default: "MyView",
         validate: input => {
           if (input.trim() === "") {
-            return "Component name cannot be empty!";
+            return "View name cannot be empty!";
           }
 
           return true;
         }
-      },
-      {
-        type: "input",
-        name: "savePath",
-        message:
-          "Where would you like to save the component (e.g., src/shared/components)?",
-        default: "src/shared/components"
       }
     ]);
 
-    this.camelCaseName = toCamelCase(answers.componentName);
-    this.pascalCaseName = toPascalCase(answers.componentName);
+    this.camelCaseName = toCamelCase(answers.viewName);
+    this.pascalCaseName = toPascalCase(answers.viewName);
 
-    this.componentName = answers.componentName;
-    this.savePath = answers.savePath;
+    const pathAnswers = await this.prompt([
+      {
+        type: "input",
+        name: "savePath",
+        message: "Where would you like to save the view (e.g., src/views)?",
+        default: "src/views"
+      }
+    ]);
+
+    this.savePath = pathAnswers.savePath;
   }
 
   writing() {
@@ -41,9 +42,9 @@ module.exports = class extends Generator {
     const scssFile = path.join(destinationFolder, `${this.camelCaseName}.scss`);
 
     this.fs.copyTpl(
-      this.templatePath("component.tpl"),
+      this.templatePath("view.tpl"),
       this.destinationPath(destinationFile),
-      { componentName: this.pascalCaseName, camelCaseName: this.camelCaseName }
+      { viewName: this.pascalCaseName, camelCaseName: this.camelCaseName }
     );
     this.fs.copyTpl(
       this.templatePath("scss.tpl"),
