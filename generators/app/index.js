@@ -7,7 +7,7 @@ module.exports = class extends Generator {
         type: "list",
         name: "type",
         message: "Hi There, What do you want to generate today?",
-        choices: ["Component", "View", "ViewModel"],
+        choices: ["Component", "View"],
         default: "Component"
       }
     ]);
@@ -15,7 +15,7 @@ module.exports = class extends Generator {
   }
 
   configuring() {
-    if (["component", "view", "viewmodel"].includes(this.selectedType)) {
+    if (["component", "view"].includes(this.selectedType)) {
       this.composeWith(require.resolve(`./${this.selectedType}`));
     } else {
       this.log("Invalid choice, please try again.");
