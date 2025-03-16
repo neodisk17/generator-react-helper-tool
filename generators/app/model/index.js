@@ -2,66 +2,90 @@ const Generator = require("yeoman-generator");
 const fs = require("fs");
 const path = require("path");
 
-function generateDTOClasses(jsonObj, className, outputPath) {
-  // Create the directory if it doesn't exist
-  // console.log("This ", this.fs);
-  // this.fs.mkdirp(outputPath);
+function prepareModelData(jsonObj, className) {
+  const fields = Object.entries(jsonObj).map(([key, value]) => {
+    const camelCaseKey = snakeToCamel(key);
+    const type = inferType(value, key);
+    return {
+      name: camelCaseKey,
+      type: type,
+      apiName: key
+    };
+  });
+
+  const constructorParams = fields
+    .map(field => `${field.name}: ${field.type}`)
+    .join(", ");
+
+  const imports = new Set();
+  fields.forEach(field => {
+    if (field.type.includes("Model")) {
+      // Handle both array and single types
+      const modelName = field.type.replace("[]", "");
+      if (modelName !== className) {
+        // Prevent self-import
+        imports.add(modelName);
+      }
+    }
+  });
+
+  return {
+    className,
+    fields,
+    constructorParams,
+    imports: Array.from(imports)
+      .map(imp => `import { ${imp} } from './${imp}';`)
+      .join("\n")
+  };
+}
+
+function generateModelClasses(jsonObj, className, outputPath) {
   if (jsonObj === null || jsonObj === undefined) return;
 
-  console.log("jsonObj ", jsonObj);
-  console.log("className ", className);
-  console.log("Out ", outputPath);
+  const capitalizedClassName = capitalizeFirstLetter(className);
   fs.mkdirSync(outputPath, { recursive: true });
 
-  // Generate the DTO class content
-  const { classContent, importStatements } = createDTOClass(jsonObj, className);
+  // Prepare data for template
+  const modelData = prepareModelData(jsonObj, capitalizedClassName);
 
-  // Write the DTO class to a TypeScript file (.ts)
-  const classFilePath = path.join(outputPath, `${className}.ts`);
-  fs.writeFileSync(classFilePath, `${importStatements}\n${classContent}`);
+  // Generate the model file
+  this.fs.copyTpl(
+    this.templatePath("model.ts.ejs"),
+    this.destinationPath(path.join(outputPath, `${capitalizedClassName}.ts`)),
+    {
+      ...modelData,
+      imports: modelData.imports
+    }
+  );
 
-  // Recursively generate nested DTO classes and add import statements
+  // Recursively generate nested models
   for (const [key, value] of Object.entries(jsonObj)) {
-    if (typeof value === "object" && !Array.isArray(value)) {
-      const nestedClassName = capitalizeFirstLetter(snakeToCamel(key)) + "DTO";
-      generateDTOClasses(value, nestedClassName, outputPath);
+    if (typeof value === "object" && value !== null) {
+      if (Array.isArray(value)) {
+        if (
+          value.length > 0 &&
+          typeof value[0] === "object" &&
+          value[0] !== null
+        ) {
+          const nestedClassName =
+            capitalizeFirstLetter(snakeToCamel(key)) + "Model";
+          generateModelClasses.call(
+            this,
+            value[0],
+            nestedClassName,
+            outputPath
+          );
+        }
+      } else {
+        const nestedClassName =
+          capitalizeFirstLetter(snakeToCamel(key)) + "Model";
+        generateModelClasses.call(this, value, nestedClassName, outputPath);
+      }
     }
   }
 }
 
-function createDTOClass(jsonObj, className) {
-  let classFields = "";
-  let importStatements = "";
-
-  // Generate constructor parameters and class fields with type inference
-  const constructorParams = Object.keys(jsonObj)
-    .map(key => {
-      const camelCaseKey = snakeToCamel(key);
-      const type = inferType(jsonObj[key]);
-
-      if (type.endsWith("DTO")) {
-        importStatements += `import { ${type} } from './${type}';\n`;
-      }
-
-      return `${camelCaseKey}: ${type}`;
-    })
-    .join(", ");
-
-  classFields = Object.keys(jsonObj)
-    .map(key => `${snakeToCamel(key)} = ${snakeToCamel(key)};`)
-    .join("\n    ");
-
-  const classContent = `export class ${className} {
-constructor({ ${constructorParams} }: { ${constructorParams} }) {
-  ${classFields}
-}
-}
-`;
-
-  return { classContent, importStatements };
-}
-
-function inferType(value) {
+function inferType(value, key) {
   if (typeof value === "string") {
     return "string";
   }
@@ -75,14 +99,22 @@ function inferType(value) {
   }
 
   if (Array.isArray(value)) {
-    return `${inferType(value[0])}[]`; // Assumes homogenous arrays
+    if (value.length === 0) return "any[]";
+    if (typeof value[0] === "object" && value[0] !== null) {
+      const nestedClassName =
+        capitalizeFirstLetter(snakeToCamel(key)) + "Model";
+      return `${nestedClassName}[]`;
+    }
+
+    return `${inferType(value[0], key)}[]`;
   }
 
-  if (typeof value === "object") {
-    return `${capitalizeFirstLetter(snakeToCamel(Object.keys(value)[0]))}DTO`;
+  if (typeof value === "object" && value !== null) {
+    const nestedClassName = capitalizeFirstLetter(snakeToCamel(key)) + "Model";
+    return nestedClassName;
   }
 
-  return "any"; // Fallback type
+  return "any";
 }
 
 function snakeToCamel(snakeStr) {
@@ -94,12 +126,17 @@ function capitalizeFirstLetter(string) {
 }
 
 module.exports = class extends Generator {
+  constructor(args, opts) {
+    super(args, opts);
+    this.sourceRoot(path.join(__dirname, "templates"));
+  }
+
   async prompting() {
     const answers = await this.prompt([
       {
         type: "input",
         name: "dtoName",
-        message: "What is the name of your DTO?",
+        message: "What is the name of your DTO class?",
         default: "",
         validate: input => {
           if (input.trim() === "") {
@@ -109,30 +146,30 @@ module.exports = class extends Generator {
           return true;
         }
       },
-      // {
-      //   type: "input",
-      //   name: "jsonPath",
-      //   message: "Enter json data",
-      //   default: "",
-      //   validate: input => {
-      //     if (input.trim() === "") {
-      //       return "DTO name cannot be empty!";
-      //     }
+      {
+        type: "input",
+        name: "jsonContent",
+        message: "Enter your JSON data:",
+        default: "",
+        validate: input => {
+          if (input.trim() === "") {
+            return "JSON content cannot be empty!";
+          }
 
-      //     try {
-      //       JSON.parse(input);
-      //       return true;
-      //       // eslint-disable-next-line no-unused-vars
-      //     } catch (e) {
-      //       return "Invalid JSON. Please enter a valid JSON string.";
-      //     }
-      //   }
-      // },
+          try {
+            JSON.parse(input);
+            return true;
+          } catch (e) {
+            console.error("Error is ", e);
+            return "Invalid JSON. Please enter a valid JSON string.";
+          }
+        }
+      },
       {
         type: "input",
         name: "outputPath",
         message:
-          "Where would you like to save the component (e.g., src/shared/dto)?",
+          "Where would you like to save the DTOs (e.g., src/shared/dto)?",
         default: "src/shared/dto"
       }
     ]);
@@ -141,16 +178,14 @@ module.exports = class extends Generator {
   }
 
   writing() {
-    const outputPath = this.answers.outputPath;
+    const { outputPath, dtoName, jsonContent } = this.answers;
 
-    // Read the JSON file
-    const jsonContent = {
-      id: 1,
-      userName: "JohnDoe",
-      isActive: true
-    };
-    console.log("Output path ", outputPath);
-    // Generate DTOs recursively with TypeScript and imports
-    generateDTOClasses(jsonContent, "RootDTO", "src/shared/dto");
+    try {
+      const parsedJson = JSON.parse(jsonContent);
+      const className = dtoName.endsWith("Model") ? dtoName : dtoName + "Model";
+      generateModelClasses.call(this, parsedJson, className, outputPath);
+    } catch (error) {
+      this.log.error("Error generating models:", error);
+    }
   }
 };

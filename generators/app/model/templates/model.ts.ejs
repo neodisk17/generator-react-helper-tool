@@ -1,0 +1,27 @@
+<% if (imports && imports.length > 0) { -%>
+<%- imports %>
+
+<% } -%>
+export class <%= className %> {
+    <% fields.forEach(function(field) { %>
+    <%= field.name %>: <%= field.type %>;
+    <% }); %>
+
+    constructor(<%= constructorParams %>) {
+        <% fields.forEach(function(field) { %>
+        this.<%= field.name %> = <%= field.name %>;
+        <% }); %>
+    }
+
+    static fromApiResponse(response: any): <%= className %> {
+        return new <%= className %>(<% fields.forEach(function(field, index) { %>response.<%= field.apiName %><% if (index < fields.length - 1) { %>, <% } %><% }); %>);
+    }
+
+    toApiRequest(): any {
+        return {
+            <% fields.forEach(function(field, index) { %>
+            <%= field.apiName %>: this.<%= field.name %><% if (index < fields.length - 1) { %>,<% } %>
+            <% }); %>
+        };
+    }
+}
